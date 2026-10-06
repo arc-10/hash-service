@@ -1,0 +1,87 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+      - name: Install dev tools
+        run: pip install -r requirements-dev.txt
+      - name: Run ruff
+        run: ruff check .
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            pyproject.toml
+      - name: Install dependencies
+        run: pip install -e . -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -v --cov=hash_service --cov-report=term-missing --junitxml=test-report.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-report
+          path: test-report.xml
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install build
+        run: pip install build
+      - name: Build package
+        run: python -m build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    environment: test
+    steps:
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Install package
+        run: pip install dist/*.whl
+      - name: Start service
+        run: nohup flask --app hash_service.app run --port 8000 > service.log 2>&1 &
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:8000/health
+          curl -fsS -X POST http://127.0.0.1:8000/hash \
+            -H "Content-Type: application/json" \
+            -d '{"text": "abc"}' | grep ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
