@@ -2,20 +2,26 @@ import hashlib
 import hmac
 import sys
 
+ITERATIONS = 200_000
 USERS = {
-    "student": "42e55121810b5867d70499dee4ba4aba9845b1574535ebaa9d96275c39225092",
+    "student": (
+        "631390153b37efe0ee91c0db883ec77a",
+        "7450d9284848ff40b0e52cb1761da77cfcb37645f630a341b175b3924588ae5c",
+    ),
 }
 
 
-def hash_password(password):
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+def hash_password(password, salt):
+    data = password.encode("utf-8")
+    key = hashlib.pbkdf2_hmac("sha256", data, bytes.fromhex(salt), ITERATIONS)
+    return key.hex()
 
 
 def login(username, password):
-    stored = USERS.get(username)
-    if stored is None:
+    if username not in USERS:
         return False
-    return hmac.compare_digest(stored, hash_password(password))
+    salt, stored = USERS[username]
+    return hmac.compare_digest(stored, hash_password(password, salt))
 
 
 if __name__ == "__main__":
